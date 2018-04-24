@@ -114,7 +114,11 @@ class TcpConnection : boost::noncopyable,
   void connectEstablished();   // should be called only once
   // called when TcpServer has removed me from its map
   void connectDestroyed();  // should be called only once
-
+	
+	//add by gaoyubin	
+	void setName(string name){
+		name_=name;
+	}
  private:
   enum StateE { kDisconnected, kConnecting, kConnected, kDisconnecting };
   void handleRead(Timestamp receiveTime);
@@ -133,7 +137,9 @@ class TcpConnection : boost::noncopyable,
   void stopReadInLoop();
 
   EventLoop* loop_;
-  const string name_;
+	//modify by gaoyubin
+  string name_;
+
   StateE state_;  // FIXME: use atomic variable
   bool reading_;
   // we don't expose those classes to client.
