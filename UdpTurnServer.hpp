@@ -1,0 +1,17 @@
+//
+// Created by tl on 18-4-19.
+//
+
+#ifndef NATTRAVERSECENTREMUDUO_UDPTURNSERVER_HPP
+#define NATTRAVERSECENTREMUDUO_UDPTURNSERVER_HPP
+
+
+//
+// Created by tl on 18-4-19.
+//
+void* turnUDP(void*arg);
+#define  UDP_TURN_PORT 1234
+
+
+
+#endif //NATTRAVERSECENTREMUDUO_UDPTURNSERVER_HPP

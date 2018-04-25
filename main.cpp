@@ -38,6 +38,9 @@ int main()
 //    while(1);
 
 
+    
+
+
     pthread_t ptd;
 
     int udpPort=UDP_TURN_PORT;
