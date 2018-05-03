@@ -12,4 +12,12 @@ link_directories("./release-install/lib")
 
 
 link_libraries(muduo_base muduo_net  pthread json)
+execute_process(
+                #COMMAND touch aaa.txt
+                #COMMAND ls -l
+                #OUTPUT_FILE aaa.txt
+        COMMAND sshpass -p tl scp natTraverseCentreMuduo tl@218.192.170.178:/home/tl/project/test
+        )
 add_executable(natTraverseCentreMuduo ${SOURCE_FILES})
+
+
