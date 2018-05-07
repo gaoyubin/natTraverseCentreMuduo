@@ -59,7 +59,15 @@ int handleRead(int sd) {
     ret = recvfrom(sd, recvbuf, MAX_BUF, 0, (struct sockaddr *) &cliAddrIn, &cliLen);
     if (ret > 0) {
         if(turnMap.find(cliAddrIn)!=turnMap.end()){
-            printf("read[%d]: %s  from  %d\n", ret, recvbuf, sd);
+            printf("read [%s] from sockfd=%d %s:%d ",
+                   recvbuf,
+                   sd,
+                   inet_ntoa(cliAddrIn.sin_addr),ntohs(cliAddrIn.sin_port));
+            printf("send to %s:%d,total %d\n",
+                   inet_ntoa(turnMap[cliAddrIn].sin_addr),
+                   ntohs(turnMap[cliAddrIn].sin_port),
+                   ret
+            );
             sendto(sd, recvbuf, ret, 0, (struct sockaddr *) &turnMap[cliAddrIn], sizeof(cliAddrIn));
         }
         else{
@@ -69,8 +77,9 @@ int handleRead(int sd) {
     } else {
         perror("");
     }
+    //sleep(10);
 
-    fflush(stdout);
+    //fflush(stdout);
 }
 
 
@@ -85,11 +94,20 @@ int acceptUdp(int sd, struct sockaddr_in my_addr) {
 
     //sleep(1);
     ret = recvfrom(sd, buf, sizeof(buf), 0, (struct sockaddr *) &cliAddrIn, &cliLen);
+    printf("recv [%s] from sockfd=%d %s:%d\n",buf,sd,inet_ntoa(cliAddrIn.sin_addr),ntohs(cliAddrIn.sin_port));
+
     std::string inStr = buf;
     if (idMap.find(inStr) != idMap.end()) {
         idMap[inStr].second = cliAddrIn;
         turnMap[cliAddrIn] = idMap[inStr].first;
         turnMap[idMap[inStr].first] = cliAddrIn;
+
+        std::cout << "the another id="<<inStr << std::endl;
+        printf("%s:%d  <------>",
+               inet_ntoa(cliAddrIn.sin_addr),
+               ntohs(cliAddrIn.sin_port),
+        printf("%s:%d\n",inet_ntoa(turnMap[cliAddrIn].sin_addr),
+                ntohs(turnMap[cliAddrIn].sin_port)));
 
         std::string outStr("OK");
         sendto(sd, outStr.c_str(), outStr.size(), 0, (struct sockaddr *) &cliAddrIn, sizeof(cliAddrIn));
@@ -98,7 +116,7 @@ int acceptUdp(int sd, struct sockaddr_in my_addr) {
     } else {
 
         idMap[inStr].first = cliAddrIn;
-        std::cout << inStr << std::endl;
+        std::cout <<"the id ="<<inStr << std::endl;
         //std::cout<<idMap[inStr].fi<<std::endl;
     }
 
@@ -132,7 +150,7 @@ int acceptUdp(int sd, struct sockaddr_in my_addr) {
     } else {
         perror("");
     }
-    printf("accept recv %s:%d\n", inet_ntoa(cliAddrIn.sin_addr),ntohs(cliAddrIn.sin_port) );
+
     //sleep(1);
     out:
     return newfd;
