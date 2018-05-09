@@ -68,13 +68,16 @@ int handleRead(int sd) {
                    ntohs(turnMap[cliAddrIn].sin_port),
                    ret
             );
-            sendto(sd, recvbuf, ret, 0, (struct sockaddr *) &turnMap[cliAddrIn], sizeof(cliAddrIn));
+             sendto(sd, recvbuf, ret, 0, (struct sockaddr *) &turnMap[cliAddrIn], sizeof(cliAddrIn));
         }
         else{
             printf("no peer\n");
         }
 
-    } else {
+    }else if(ret==0){
+        printf("heartBeat\n");
+    }
+    else {
         perror("");
     }
     //sleep(10);
@@ -180,6 +183,7 @@ void* handleAccept(void*arg){
         exit(1);
     }
 }
+
 void *turnUDP(void *arg) {
     //idMap["1"]=std::pair<struct sockaddr_in,struct sockaddr_in>();
     //sMap["2"]="sfsdf";

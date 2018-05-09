@@ -15,8 +15,17 @@
 
 #include "UdpTurnServer.hpp"
 
+
+//int add(int a,int b){
+//    return a+b;
+//}
+//int add(int &a,int& b){
+//    return a+b;
+//}
 int main()
 {
+//    int a=3,b=4;
+//    cout<<add(a,b)<<endl;
 //    std::map<int ,std::string>m;
 //    std::cout<<m[2]<<std::endl;
 //    m[4]="2sdfs";
@@ -38,8 +47,13 @@ int main()
 //    while(1);
 
 
-
-
+    //int netmask=0xffffffff,uIP=0xc0a80193,pIP=0xc0a80165;
+    //cout<<netmask&
+//    uint32_t  uiNetMask=ntohl(inet_addr("255.255.255.0"));
+//    uint32_t  uiUNameIP=ntohl(inet_addr("192.168.1.147"));
+//    uint32_t  uiPeerNameIP=ntohl(inet_addr("192.168.1.101"));
+//    printf("%x\n",uiNetMask);
+    /***************************************************/
 
     pthread_t ptd;
 
