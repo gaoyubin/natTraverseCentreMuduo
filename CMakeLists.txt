@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.8)
 project(natTraverseCentreMuduo)
 
+add_definitions("-g")
 set(CMAKE_CXX_STANDARD 11)
 
 
@@ -18,6 +19,5 @@ execute_process(
                 #OUTPUT_FILE aaa.txt
         COMMAND sshpass -p tl scp natTraverseCentreMuduo tl@218.192.170.178:/home/tl/project/test
         )
+
 add_executable(natTraverseCentreMuduo ${SOURCE_FILES})
-
-

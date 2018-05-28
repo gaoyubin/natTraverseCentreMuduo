@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <boost/bind/placeholders.hpp>
 #include <arpa/inet.h>
+#include <signal.h>
 
 //#include<pthread.h>
 // using namespace muduo;
@@ -53,10 +54,23 @@ int main()
 //    uint32_t  uiUNameIP=ntohl(inet_addr("192.168.1.147"));
 //    uint32_t  uiPeerNameIP=ntohl(inet_addr("192.168.1.101"));
 //    printf("%x\n",uiNetMask);
+//    char buf[]="name=1234";
+//    char str1[32]={0};
+//    char str2[32]={0};
+//    sscanf(buf,"name=%s",str2);
+//    printf("%s\n",str2);
+    //printf("\n");
+    //printf("sdfs\n");
+//    while(1);
+    //return 1;
     /***************************************************/
 
-    pthread_t ptd;
+    //signal(SIGURG,SIG_IGN);
 
+    string s="12345";
+    char chs[20]={1,2,3,4,5,6,6,77,8};
+    strncpy(chs,s.c_str(),s.size());
+    pthread_t ptd;
     int udpPort=UDP_TURN_PORT;
     pthread_create(&ptd,NULL,turnUDP,&udpPort);
     //while(1);
@@ -68,7 +82,7 @@ int main()
     centreServer.start();
 
 
-    TcpTurnServer tcpTurnServer(&loop, muduo::net::InetAddress (8888));
+    TcpTurnServer tcpTurnServer(&loop, muduo::net::InetAddress (TCP_TURN_PORT));
     tcpTurnServer.start();
 
 

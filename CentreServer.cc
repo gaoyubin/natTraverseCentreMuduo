@@ -2,8 +2,10 @@
 #include "UdpTurnServer.hpp"
 
 #include <muduo/base/Logging.h>
+#include <muduo/net/EventLoop.h>
 
 #include <boost/bind.hpp>
+
 #include <json/json.h>
 
 #include <string>
@@ -108,12 +110,21 @@ int getInterface(char *localIp, char *netMask, char *netInterface){
 }
 CentreServer::CentreServer(muduo::net::EventLoop* loop,
                        const muduo::net::InetAddress& listenAddr)
-  : server_(loop, listenAddr, "CentreServer") {
+  : server_(loop, listenAddr, "CentreServer"),
+  codec_(boost::bind(&CentreServer::onMessage,this,_1,_2,_3))
+{
+
+
     server_.setConnectionCallback(
             boost::bind(&CentreServer::onConnection, this, _1));
-    server_.setMessageCallback(
-            boost::bind(&CentreServer::onMessage, this, _1, _2, _3));
-    //server_.setCloseCallback(boost::bind(&CentreServer::onRemoveConnection,this,_1));
+    //replace by gaoyubin
+//    server_.setMessageCallback(
+//            boost::bind(&CentreServer::onMessage, this, _1, _2, _3));
+
+    server_.setMessageCallback(boost::bind(&LengthHeaderCodec::onMessage,&codec_,_1,_2,_3));
+
+    //begin heartBeat check
+    server_.getLoop()->runEvery(5,boost::bind(&CentreServer::checkHeartBeat,this));
 
 }
 void CentreServer::start()
@@ -140,23 +151,18 @@ void CentreServer::onConnection(const muduo::net::TcpConnectionPtr& conn)
     else{
         if(conn->name()!="nologin"){
 
-
-            auto it=traversePairMap.find(conn->name());
-            if(it!=traversePairMap.end()){
-                //connMap.erase(traversePairMap[conn->name()]);
-                connMap[traversePairMap[conn->name()]].natType=-1;
-
-                traversePairMap.erase(traversePairMap[conn->name()]);
-                traversePairMap.erase(it);
+            if(connMap[conn->name()].size()!=0){
+                for(auto it=connMap[conn->name()].begin();it!=connMap[conn->name()].end();) {
+                    connMap[it->first].erase(conn->name());
+                    it=connMap[conn->name()].erase(it);
+                }
             }
-
-
-            connMap.erase(conn->name());
+            nameToConnMap.erase(conn->name());
 
         }
 
     }
-    for(auto it=connMap.begin();it!=connMap.end();++it){
+    for(auto it=nameToConnMap.begin();it!=nameToConnMap.end();++it){
         cout<<"the userlist :"<<endl;
         cout<<it->first<<endl;
     }
@@ -190,10 +196,10 @@ void sendTraverseCmd(const muduo::net::TcpConnectionPtr& conn,string uAddr,strin
     sendCodec(conn,outVal.toStyledString());
 
 }
-void sendDetectCmd(const muduo::net::TcpConnectionPtr& conn,string id){
+void sendDetectCmd(const muduo::net::TcpConnectionPtr& conn,string peerName){
     Json::Value outVal;
     outVal["cmd"]="detect";
-    outVal["id"]=id;
+    outVal["peerName"]=peerName;
     char localIP[32];
     getInterface(localIP,NULL,NULL);
     outVal["stunSvrIP"]=localIP;
@@ -208,65 +214,74 @@ void sendUdpTurnCmd(const muduo::net::TcpConnectionPtr &conn, string &id, int po
     outVal["port"]=port;
     sendCodec(conn,outVal.toStyledString());
 }
-void CentreServer::ControlClientOnMessage(const muduo::net::TcpConnectionPtr& conn,
-               muduo::net::Buffer* buf,
+void CentreServer::onMessage(const muduo::net::TcpConnectionPtr& conn,
+               //muduo::net::Buffer* buf,
+               const muduo::string& message,
                muduo::Timestamp time){
-    int32_t len=buf->peekInt32();//already ntohl
-    if(buf->readableBytes()<len)
-        return;
-    buf->retrieveInt32();
-    string msg(buf->retrieveAsString(len));
+//    int32_t len=buf->peekInt32();//already ntohl
+//    if(buf->readableBytes()<len)
+//        return;
+//    buf->retrieveInt32();
+//    string msg(buf->retrieveAsString(len));
+    string msg=message;
     //LOG_INFO << conn->name() << " echo " << msg.size() << " bytes, "<< "data received at " << time.toString();
 
-    cout<<msg<<endl;
+
 
     Json::Reader reader;
     Json::Value inVal;
     if(reader.parse(msg,inVal)){
+
+
         if(!inVal["cmd"].isNull())
         {
+            if(inVal["cmd"]!="heartBeat")
+                cout<<msg<<endl;
             if(inVal["cmd"]=="login"){
                 string uname=inVal["uname"].asString();
                 string pwd=inVal["pwd"].asString();
-//                std::cout<<inVal["cmd"].asString()<<std::endl;
-//                std::cout<<inVal["c/s"].asString()<<std::endl;
-//                std::cout<<uname<<std::endl;
-//                std::cout<<pwd<<std::endl;
+
 
                 conn->setName(uname);
-                if(connMap.find(uname)!=connMap.end()){
+                if(nameToConnMap.find(uname)!=nameToConnMap.end()){
                     sendRespondCmd(conn,"login","FAIL");
                 }
                 else{
-                    connMap[uname].conn=conn;
+                    nameToConnMap[uname]=conn;
                     sendRespondCmd(conn,"login","OK");
 
                 }
 
-                //conn->send("hello");
+                //conn->send("hello");     string uname=conn->name();
+//                    string peerName=inVal["peerName"].asString();
+//                    int  natType=inVal["natType"].asInt();
+            }
+            else if(inVal["cmd"]=="heartBeat"){
+                conn->heartBeatCnt=0;
             }
             else if(inVal["cmd"]=="see") {
                 string peerName=inVal["peerName"].asString();
                 string peerPwd=inVal["peerPwd"].asString();
+
 
                 string uname=conn->name();
 
                 //if(peerName=="tl" && peerPwd=="123456")
                 {
                     Json::Value sendVal;
-                    if(connMap.find(peerName)!=connMap.end()){
+                    if(nameToConnMap.find(peerName)!=nameToConnMap.end()){
 
                         sendRespondCmd(conn,"see","OK");
 
-                        muduo::net::TcpConnectionPtr peerConn=connMap[peerName].conn;
-                        traversePairMap[peerName]=uname;
-                        traversePairMap[uname]=peerName;
+                        muduo::net::TcpConnectionPtr peerConn=nameToConnMap[peerName];
+                        //traversePairMap[peerName]=uname;
+                        //traversePairMap[uname]=peerName;
 
-                        string id= getUniqueID();
+                        //string id= getUniqueID();
                         //cout<<conn->name()<<endl;
                         //cout<<peerConn->name()<<endl;
-                        sendDetectCmd(conn,id);
-                        sendDetectCmd(peerConn,id);
+                        sendDetectCmd(conn,peerName);
+                        sendDetectCmd(peerConn,uname);
 
                         //conn->send(sendVal.toStyledString());
                         //peerConn->send(sendVal.toStyledString());
@@ -280,60 +295,62 @@ void CentreServer::ControlClientOnMessage(const muduo::net::TcpConnectionPtr& co
 
             }
             else if(inVal["cmd"]=="list"){
-                string userList;
-                for(auto it=connMap.begin();it!=connMap.end();++it){
-                    userList+=it->second.conn->name()+" ";
+                string userStr;
+                for(auto it=nameToConnMap.begin();it!=nameToConnMap.end();++it){
+                    userStr+=it->first+" ";
                 }
-                sendRespondCmd(conn,"list","OK",userList);
+                sendRespondCmd(conn,"list","OK",userStr);
 
             }
 
             else if(inVal["cmd"]=="respond"){
                 if(inVal["answerCmd"]=="detect"){
                     string uname=conn->name();
+                    string peerName=inVal["peerName"].asString();
                     int  natType=inVal["natType"].asInt();
 
 
-                    connMap[uname].natType=natType;
-                    connMap[uname].netMask=inVal["netMask"].asString();
+                    connMap[uname][peerName].natType=natType;
+                    connMap[uname][peerName].netMask=inVal["netMask"].asString();
 
 //                    connMap[uname].reflexAddr=inVal["reflexAddr"].asString();
 //                    connMap[uname].hostAddr=inVal["hostAddr"].asString();
 //                    connMap[uname].netMask=inVal["netMask"].asString();
-                    connMap[uname].trCompAddrVect.clear();
+                    connMap[uname][peerName].trCompAddrVect.clear();
                     for(int i=0;i<inVal["comp"]["cnt"].asInt();++i){
                         TrCompAddr trCompAddr;
+                        //#for test
                         trCompAddr.reflexAddr=inVal["comp"][to_string(i)]["reflexAddr"].asString();
                         trCompAddr.hostAddr=inVal["comp"][to_string(i)]["hostAddr"].asString();
 
                         if(!inVal["comp"][to_string(i)]["len"].isNull()){
-                            connMap[uname].gottenPort=true;
+                            connMap[uname][peerName].gottenPort=true;
                             trCompAddr.len=inVal["comp"][to_string(i)]["len"].asInt();
                         }
 
 
                         if(!inVal["comp"][to_string(i)]["step"].isNull())
                             trCompAddr.step=inVal["comp"][to_string(i)]["step"].asInt();
-                        connMap[uname].trCompAddrVect.push_back(trCompAddr);
+                        connMap[uname][peerName].trCompAddrVect.push_back(trCompAddr);
                     }
 
 
-                    string peerName=traversePairMap[uname];
-                    auto it= connMap.find(peerName);
-                    if( it!=connMap.end() && it->second.natType!=-1){
+
+                    auto it= connMap[peerName].find(uname);
+                    if( it!=connMap[peerName].end() && it->second.natType!=-1){
                         cout<<"detect success"<<endl;
                         //printf("%s:%d,%s:%d\n",uname.c_str(),connMap[uname].natType,peerName.c_str(),connMap[peerName]);
                         //cout<<connMap[uname]<<endl;
-                        for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
+                        for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
                             printf("hostAddr=%s,reflexAddr=%s\n",
-                                   connMap[uname].trCompAddrVect[i].hostAddr.c_str(),
-                                   connMap[uname].trCompAddrVect[i].reflexAddr.c_str());
+                                   connMap[uname][peerName].trCompAddrVect[i].hostAddr.c_str(),
+                                   connMap[uname][peerName].trCompAddrVect[i].reflexAddr.c_str());
                         }
                         cout<<"------------------"<<endl;
-                        for(int i=0;i<connMap[peerName].trCompAddrVect.size();++i){
+                        for(int i=0;i<connMap[peerName][uname].trCompAddrVect.size();++i){
                             printf("hostAddr=%s,reflexAddr=%s\n",
-                                   connMap[peerName].trCompAddrVect[i].hostAddr.c_str(),
-                                   connMap[peerName].trCompAddrVect[i].reflexAddr.c_str());
+                                   connMap[peerName][uname].trCompAddrVect[i].hostAddr.c_str(),
+                                   connMap[peerName][uname].trCompAddrVect[i].reflexAddr.c_str());
                         }
                         //cout<<connMap[peerName]<<endl;
 
@@ -345,29 +362,29 @@ void CentreServer::ControlClientOnMessage(const muduo::net::TcpConnectionPtr& co
 
                         uOutVal["cmd"] = "traverse";
                         pOutVal["cmd"] = "traverse";
-                        uOutVal["comp"]["cnt"] = (int)connMap[uname].trCompAddrVect.size();
-                        pOutVal["comp"]["cnt"] = (int)connMap[uname].trCompAddrVect.size();
 
+                        uOutVal["comp"]["cnt"] = (int)connMap[uname][peerName].trCompAddrVect.size();
+                        pOutVal["comp"]["cnt"] = (int)connMap[uname][peerName].trCompAddrVect.size();
 
+                        uOutVal["peerName"]=peerName;
+                        pOutVal["peerName"]=uname;
 
+                        sscanf(connMap[uname][peerName].trCompAddrVect[0].hostAddr.c_str(),"%[^:]:%d",uHostIP,&uHostPort);
+                        sscanf(connMap[peerName][uname].trCompAddrVect[0].hostAddr.c_str(),"%[^:]:%d",peerHostIP,&peerHostPort);
 
-
-                        sscanf(connMap[uname].trCompAddrVect[0].hostAddr.c_str(),"%[^:]:%d",uHostIP,&uHostPort);
-                        sscanf(connMap[peerName].trCompAddrVect[0].hostAddr.c_str(),"%[^:]:%d",peerHostIP,&peerHostPort);
-
-                        sscanf(connMap[uname].trCompAddrVect[0].reflexAddr.c_str(),"%[^:]:%d",uReflexIP,&uReflexPort);
-                        sscanf(connMap[peerName].trCompAddrVect[0].reflexAddr.c_str(),"%[^:]:%d",peerReflexIP,&peerReflexPort);
+                        sscanf(connMap[uname][peerName].trCompAddrVect[0].reflexAddr.c_str(),"%[^:]:%d",uReflexIP,&uReflexPort);
+                        sscanf(connMap[peerName][uname].trCompAddrVect[0].reflexAddr.c_str(),"%[^:]:%d",peerReflexIP,&peerReflexPort);
 
 
                         int checkListIndex=0;
                         cout<<"checkListIndex="<<checkListIndex<<endl;
                         cout<<"---------------------"<<endl;
-                        cout<<connMap[uname].netMask<<endl;
+                        cout<<connMap[uname][peerName].netMask<<endl;
                         cout<<uReflexIP<<endl;
                         cout<<peerReflexIP<<endl;
 
                         if(strcmp(uReflexIP,peerReflexIP)==0) {
-                            uint32_t  uiNetMask=ntohl(inet_addr(connMap[uname].netMask.c_str()));
+                            uint32_t  uiNetMask=ntohl(inet_addr(connMap[uname][peerName].netMask.c_str()));
                             uint32_t  uiUNameIP=ntohl(inet_addr(uHostIP));
                             uint32_t  uiPeerNameIP=ntohl(inet_addr(peerHostIP));
 
@@ -375,16 +392,16 @@ void CentreServer::ControlClientOnMessage(const muduo::net::TcpConnectionPtr& co
 //                            cout<<uiUNameIP<<endl;
 //                            cout<<uiPeerNameIP<<endl;
                             printf("netmask=%x,uIP=%x,pIP=%x\n",uiNetMask,uiUNameIP,uiPeerNameIP);
-                            if (connMap[uname].netMask == connMap[peerName].netMask &&
+                            if (connMap[uname][peerName].netMask == connMap[peerName][uname].netMask &&
                                 (uiNetMask & uiUNameIP) == (uiNetMask & uiPeerNameIP)) {
 
-                                for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
+                                for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
                                     //for test
 //                                    connMap[peerName].trCompAddrVect[i].hostAddr+="1";
 //                                    connMap[uname].trCompAddrVect[i].hostAddr+="1";
 
-                                    uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)] = connMap[peerName].trCompAddrVect[i].hostAddr;
-                                    pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname].trCompAddrVect[i].hostAddr;
+                                    uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)] = connMap[peerName][uname].trCompAddrVect[i].hostAddr;
+                                    pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname][peerName].trCompAddrVect[i].hostAddr;
                                 }
 
 
@@ -394,43 +411,47 @@ void CentreServer::ControlClientOnMessage(const muduo::net::TcpConnectionPtr& co
                             }
                         }
 
-                        if(connMap[uname].natType==NatTypeOpen || connMap[peerName].natType==NatTypeOpen){ //u is not nat
+                        if(connMap[uname][peerName].natType==NatTypeOpen || connMap[peerName][uname].natType==NatTypeOpen){ //u is not nat
 
-                            for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
-                                uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName].trCompAddrVect[i].reflexAddr;
-                                pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname].trCompAddrVect[i].reflexAddr;
+                            for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
+                                uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName][uname].trCompAddrVect[i].reflexAddr;
+                                pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname][peerName].trCompAddrVect[i].reflexAddr;
                             }
                             checkListIndex++;
                             cout<<"invert connection"<<endl;
 
                         }
 
-                        else if(connMap[uname].natType==NatTypeCone && connMap[peerName].natType==NatTypeCone){
-                            for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
-                                uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName].trCompAddrVect[i].reflexAddr;
-                                pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname].trCompAddrVect[i].reflexAddr;
+                        else if(connMap[uname][peerName].natType==NatTypeCone && connMap[peerName][uname].natType==NatTypeCone){
+                            for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
+                                uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName][uname].trCompAddrVect[i].reflexAddr;
+                                pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname][peerName].trCompAddrVect[i].reflexAddr;
                             }
                             checkListIndex++;
 
 
                         }
-                        else if(connMap[uname].natType==NatTypeSymInc && connMap[peerName].natType==NatTypeCone){
-                            if(connMap[uname].gottenPort==false){
+                        else if(connMap[uname][peerName].natType==NatTypeSymInc && connMap[peerName][uname].natType==NatTypeCone){
+                            if(connMap[uname][peerName].gottenPort==false){
                                 Json::Value getPortVal;
                                 getPortVal["cmd"]="getPort";
-                                for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
-                                    getPortVal["comp"][to_string(i)]=connMap[peerName].trCompAddrVect[i].reflexAddr;
+                                getPortVal["peerName"]=peerName;
+                                getPortVal["comp"]["cnt"]=(int)connMap[uname][peerName].trCompAddrVect.size();
+                                for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
+                                    getPortVal["comp"][to_string(i)]=connMap[peerName][uname].trCompAddrVect[i].reflexAddr;
                                 }
-                                sendCodec(connMap[uname].conn,getPortVal.toStyledString());
+                                getPortVal["cnt"]=(int)connMap[uname][peerName].trCompAddrVect.size();
+                                sendCodec(nameToConnMap[uname],getPortVal.toStyledString());
                                 goto end;
                             }
                             else{
-                                for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
-                                    uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName].trCompAddrVect[i].reflexAddr;
-                                    pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname].trCompAddrVect[i].reflexAddr;
+                                for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
+                                    uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName][uname].trCompAddrVect[i].reflexAddr;
+                                    pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname][peerName].trCompAddrVect[i].reflexAddr;
 
-                                    pOutVal["comp"][to_string(i)]["checklist"]["len"]=connMap[uname].trCompAddrVect[i].len;
-                                    pOutVal["comp"][to_string(i)]["checklist"]["step"]=connMap[uname].trCompAddrVect[i].step;
+                                    pOutVal["comp"][to_string(i)]["checklist"]["len"]=connMap[uname][peerName].trCompAddrVect[i].len;
+                                    pOutVal["comp"][to_string(i)]["checklist"]["step"]=connMap[uname][peerName].trCompAddrVect[i].step;
+                                    pOutVal["comp"][to_string(i)]["checklist"]["index"]=checkListIndex;
                                 }
                             }
                             checkListIndex++;
@@ -438,40 +459,79 @@ void CentreServer::ControlClientOnMessage(const muduo::net::TcpConnectionPtr& co
 
 
                         }
-                        else if(connMap[uname].natType==NatTypeCone && connMap[peerName].natType==NatTypeSymInc){
-                            if(connMap[peerName].gottenPort==false){
+                        else if(connMap[uname][peerName].natType==NatTypeCone && connMap[peerName][uname].natType==NatTypeSymInc){
+                            if(connMap[peerName][uname].gottenPort==false){
                                 Json::Value getPortVal;
                                 getPortVal["cmd"]="getPort";
-                                getPortVal["comp"]["cnt"]=(int)connMap[uname].trCompAddrVect.size();
-                                for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
-                                    getPortVal["comp"][to_string(i)]=connMap[uname].trCompAddrVect[i].reflexAddr;
+                                getPortVal["peerName"]=uname;
+                                getPortVal["comp"]["cnt"]=(int)connMap[uname][peerName].trCompAddrVect.size();
+                                for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
+                                    getPortVal["comp"][to_string(i)]=connMap[uname][peerName].trCompAddrVect[i].reflexAddr;
                                 }
-                                sendCodec(connMap[peerName].conn,getPortVal.toStyledString());
+                                //getPortVal["cnt"]=(int)connMap[uname][peerName].trCompAddrVect.size();
+                                sendCodec(nameToConnMap[peerName],getPortVal.toStyledString());
                                 goto end;
 
                             }
                             else{
-                                for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
-                                    uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName].trCompAddrVect[i].reflexAddr;
-                                    pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname].trCompAddrVect[i].reflexAddr;
+                                for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
+                                    uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName][uname].trCompAddrVect[i].reflexAddr;
+                                    pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname][peerName].trCompAddrVect[i].reflexAddr;
 
-                                    uOutVal["comp"][to_string(i)]["checklist"]["len"]=connMap[peerName].trCompAddrVect[i].len;
-                                    uOutVal["comp"][to_string(i)]["checklist"]["step"]=connMap[peerName].trCompAddrVect[i].step;
+                                    uOutVal["comp"][to_string(i)]["checklist"]["len"]=connMap[peerName][uname].trCompAddrVect[i].len;
+                                    uOutVal["comp"][to_string(i)]["checklist"]["step"]=connMap[peerName][uname].trCompAddrVect[i].step;
+                                    uOutVal["comp"][to_string(i)]["checklist"]["index"]=checkListIndex;
                                 }
                             }
                             checkListIndex++;
 
                         }
-                        else if(connMap[uname].natType==NatTypeSymInc && connMap[peerName].natType==NatTypeSymInc){
-                            for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
-                                uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName].trCompAddrVect[i].reflexAddr;
-                                pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname].trCompAddrVect[i].reflexAddr;
+                        else if(connMap[uname][peerName].natType==NatTypeSymInc && connMap[peerName][uname].natType==NatTypeSymInc){
+
+                            for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
+                                uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName][uname].trCompAddrVect[i].reflexAddr;
+                                pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname][peerName].trCompAddrVect[i].reflexAddr;
                             }
                             checkListIndex++;
-                        }
 
+                        }/******************************************random********************************/
+                        else if(connMap[uname][peerName].natType==NatTypeSymRandom && connMap[peerName][uname].natType==NatTypeCone){
+                            for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
+
+
+                                uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName][uname].trCompAddrVect[i].reflexAddr;
+                                uOutVal["comp"][to_string(i)]["checklist"]["natType"]=NatTypeSymRandom;
+                                //pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname][peerName].trCompAddrVect[i].reflexAddr;
+                                pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]=uReflexIP+string(":")+to_string(uReflexPort-200>1024?uReflexPort-200:1024);
+
+                                pOutVal["comp"][to_string(i)]["checklist"]["len"]=400;
+                                pOutVal["comp"][to_string(i)]["checklist"]["step"]=1;
+                                pOutVal["comp"][to_string(i)]["checklist"]["index"]=checkListIndex;
+                            }
+                            checkListIndex++;
+
+
+                        }
+                        else if(connMap[uname][peerName].natType==NatTypeCone && connMap[peerName][uname].natType==NatTypeSymRandom){
+                            for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
+
+
+                                //uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[peerName][uname].trCompAddrVect[i].reflexAddr;
+                                uOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]=peerReflexIP+string(":")+to_string(peerReflexPort-200>1024?peerReflexPort-200:1024);
+                                pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]= connMap[uname][peerName].trCompAddrVect[i].reflexAddr;
+                                pOutVal["comp"][to_string(i)]["checklist"]["natType"]=NatTypeSymRandom;
+                                //pOutVal["comp"][to_string(i)]["checklist"][to_string(checkListIndex)]=uReflexIP+string(":")+to_string(uReflexPort-1000>1024?uReflexPort-1000:1024);
+
+                                uOutVal["comp"][to_string(i)]["checklist"]["len"]=400;
+                                uOutVal["comp"][to_string(i)]["checklist"]["step"]=1;
+                                uOutVal["comp"][to_string(i)]["checklist"]["index"]=checkListIndex;
+                            }
+                            checkListIndex++;
+
+
+                        }
                         //checkListIndex++;
-                        for(int i=0;i<connMap[uname].trCompAddrVect.size();++i){
+                        for(int i=0;i<connMap[uname][peerName].trCompAddrVect.size();++i){
 
                             char localIP[32];
                             getInterface(localIP,NULL,NULL);
@@ -485,10 +545,26 @@ void CentreServer::ControlClientOnMessage(const muduo::net::TcpConnectionPtr& co
                             pOutVal["comp"][to_string(i)]["checklist"]["id"]=id;
 
 
+
+
                             uOutVal["comp"][to_string(i)]["checklist"]["cnt"] = checkListIndex+1;
                             pOutVal["comp"][to_string(i)]["checklist"]["cnt"]= checkListIndex+1;
 
                         }
+
+                        {
+                            uOutVal["tcpID"]=getUniqueID();
+                            pOutVal["tcpID"]=uOutVal["tcpID"];
+
+                            char localIP[32];
+                            getInterface(localIP,NULL,NULL);
+                            uOutVal["tcpTurnSvrAddr"]=string(localIP) +":"+ to_string(TCP_TURN_PORT);
+                            pOutVal["tcpTurnSvrAddr"]=string(localIP) +":"+ to_string(TCP_TURN_PORT);
+
+                        }
+
+
+
 
 
 
@@ -496,12 +572,14 @@ void CentreServer::ControlClientOnMessage(const muduo::net::TcpConnectionPtr& co
                         sendCodec(conn,uOutVal.toStyledString());
                         //for test
                         //usleep(200*1000);
-                        sendCodec(connMap[peerName].conn,pOutVal.toStyledString());
+                        sendCodec(nameToConnMap[peerName],pOutVal.toStyledString());
+
 end:                    ;
                     }
 
 
                 }
+#if 0
                 else if(inVal["answerCmd"]=="getPort"){
 
                 }
@@ -547,6 +625,8 @@ end:                    ;
                         }
                     }
                 }
+
+#endif
             }
 
 
@@ -559,6 +639,21 @@ end:                    ;
 
 
 }
+
+void CentreServer::checkHeartBeat(void) {
+    for(auto it=nameToConnMap.begin();it!=nameToConnMap.end();){
+
+        if(++(it->second->heartBeatCnt)>5){
+            cout<<"delete this user "<<it->first<<endl;
+            it=nameToConnMap.erase(it);
+        }
+        else{
+            ++it;
+        }
+    }
+    //printf("checkHeartBeat\n");
+}
+/*
 void CentreServer::TurnTcpOnMessage(const muduo::net::TcpConnectionPtr& conn,
                muduo::net::Buffer* buf,
                muduo::Timestamp time){
@@ -581,4 +676,4 @@ void CentreServer::onMessage(const muduo::net::TcpConnectionPtr& conn,
     //}
 
 }
-
+*/

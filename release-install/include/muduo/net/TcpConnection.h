@@ -119,6 +119,8 @@ class TcpConnection : boost::noncopyable,
 	void setName(string name){
 		name_=name;
 	}
+	//add by gaoyubin
+	int heartBeatCnt;
  private:
   enum StateE { kDisconnected, kConnecting, kConnected, kDisconnecting };
   void handleRead(Timestamp receiveTime);

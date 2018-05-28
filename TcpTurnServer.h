@@ -21,8 +21,9 @@ class TcpTurnServer
                  muduo::Timestamp time);
 
   muduo::net::TcpServer server_;
-    std::map<std::string, std::pair< muduo::net::TcpConnectionPtr,  muduo::net::TcpConnectionPtr> > idMap;
-    std::map<muduo::net::TcpConnectionPtr,  muduo::net::TcpConnectionPtr> turnMap;
+    std::map<std::string, std::pair< std::string,std::string> > idMap;
+    std::map<std::string,std::string> turnMap;
+    std::map<std::string, muduo::net::TcpConnectionPtr >addrToConnMap;
 };
 
 #endif  // MUDUO_EXAMPLES_SIMPLE_ECHO_ECHO_H

@@ -2,6 +2,7 @@
 #define NATTRAVERSECENTREMUDUO_CENTRESERVER_H
 
 #include <muduo/net/TcpServer.h>
+#include "codec.h"
 #include <iostream>
 #include <map>
 #include <string>
@@ -49,9 +50,9 @@ struct  TrCompAddr{
     int step=0;
 
 };
-class connSession {
+class Session {
 public:
-    muduo::net::TcpConnectionPtr conn;
+    //muduo::net::TcpConnectionPtr conn;
     vector<TrCompAddr> trCompAddrVect;
     int natType=-1;
 //    std::string hostAddr;
@@ -61,7 +62,7 @@ public:
     EMTraverseState emTraverseState=EMTState_INIT;
     bool gottenPort=false;
     bool canStart=false;
-    friend  std::ostream& operator<<(std::ostream&out,connSession& cs){
+    friend  std::ostream& operator<<(std::ostream&out,Session& cs){
         std::cout<<cs.netMask<<"|"<<cs.natType<<"|"<<cs.emTraverseState<<endl;
 //        for(int i=0;i<trCompAddrVect.size();++i){
 //
@@ -90,22 +91,25 @@ class CentreServer
   void onConnection(const muduo::net::TcpConnectionPtr& conn);
 
   void onMessage(const muduo::net::TcpConnectionPtr& conn,
-                 muduo::net::Buffer* buf,
+                 //muduo::net::Buffer* buf,
+                 const muduo::string& message,
                  muduo::Timestamp time);
     //void onRemoveConnection(const muduo::net::TcpConnectionPtr& conn);
-    void ControlClientOnMessage(const muduo::net::TcpConnectionPtr& conn,
-                                     muduo::net::Buffer* buf,
-                                     muduo::Timestamp time);
-    void TurnTcpOnMessage(const muduo::net::TcpConnectionPtr& conn,
-                               muduo::net::Buffer* buf,
-                               muduo::Timestamp time);
-  muduo::net::TcpServer server_;
-    std::map<std::string,connSession> connMap;
-    std::map<std::string,std::string>traversePairMap;
+//    void ControlClientOnMessage(const muduo::net::TcpConnectionPtr& conn,
+//                                     muduo::net::Buffer* buf,
+//                                     muduo::Timestamp time);
+//    void TurnTcpOnMessage(const muduo::net::TcpConnectionPtr& conn,
+//                               muduo::net::Buffer* buf,
+//                               muduo::Timestamp time);
+    void checkHeartBeat(void);
+    muduo::net::TcpServer server_;
+    std::map<std::string,map<string,Session>> connMap;
+    //std::map<std::string,std::string>traversePairMap;
+    std::map<std::string,muduo::net::TcpConnectionPtr>nameToConnMap;
 
 
     //std::map<std::string,int>natTypeMap;
-
+    LengthHeaderCodec codec_;
 };
 
 #endif  // MUDUO_EXAMPLES_SIMPLE_ECHO_ECHO_H
