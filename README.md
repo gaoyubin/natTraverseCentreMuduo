@@ -1,0 +1,2 @@
+# natTraverseCentreMuduo
+natTraverseCentreMuduo为打洞服务器，直接运行，不用加参数，默认绑定2007号端口
